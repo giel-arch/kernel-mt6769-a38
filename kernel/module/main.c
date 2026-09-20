@@ -2113,27 +2113,6 @@ static void module_augment_kernel_taints(struct module *mod, struct load_info *i
 
 static int check_modinfo(struct module *mod, struct load_info *info, int flags)
 {
-	const char *modmagic = get_modinfo(info, "vermagic");
-	int err;
-
-	if (flags & MODULE_INIT_IGNORE_VERMAGIC)
-		modmagic = NULL;
-
-	/* This is allowed: modprobe --force will invalidate it. */
-	if (!modmagic) {
-		err = try_to_force_load(mod, "bad vermagic");
-		if (err)
-			return err;
-	} else if (!same_magic(modmagic, vermagic, info->index.vers)) {
-		pr_err("%s: version magic '%s' should be '%s'\n",
-		       info->name, modmagic, vermagic);
-		return -ENOEXEC;
-	}
-
-	err = check_modinfo_livepatch(mod, info);
-	if (err)
-		return err;
-
 	return 0;
 }
 
