@@ -2113,6 +2113,12 @@ static void module_augment_kernel_taints(struct module *mod, struct load_info *i
 
 static int check_modinfo(struct module *mod, struct load_info *info, int flags)
 {
+	int err;
+
+	err = check_modinfo_livepatch(mod, info);
+	if (err)
+		return err;
+
 	return 0;
 }
 
