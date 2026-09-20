@@ -22,7 +22,11 @@ jobs:
     - name: Download Toolchain (AOSP Clang)
       run: |
         mkdir -p $GITHUB_WORKSPACE/toolchain
-        git clone --depth=1 https://github.com/kdrag0n/proton-clang.git $GITHUB_WORKSPACE/toolchain
+        cd $GITHUB_WORKSPACE/toolchain
+        curl -LO "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman"
+        chmod +x antman
+        ./antman -S
+        ./antman --patch=glibc
         
     - name: Setup Kernel Config
       run: |
