@@ -22,7 +22,7 @@ jobs:
     - name: Download Toolchain (AOSP Clang)
       run: |
         mkdir -p $GITHUB_WORKSPACE/toolchain
-        git clone --depth=1 https://github.com/ZyCromerZ/Clang.git -b 14.0.0-r450784d-1 $GITHUB_WORKSPACE/toolchain
+        git clone --depth=1 https://github.com/ZyCromerZ/Clang.git $GITHUB_WORKSPACE/toolchain
         
     - name: Setup Kernel Config
       run: |
