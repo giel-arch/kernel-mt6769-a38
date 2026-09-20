@@ -1165,8 +1165,8 @@ static const struct kernel_symbol *resolve_symbol(struct module *mod,
 	if (is_vendor_module &&
 	    !is_vendor_exported_symbol &&
 	    !gki_is_module_unprotected_symbol(name)) {
-		fsa.sym = ERR_PTR(-EACCES);
-		goto getname;
+		// fsa.sym = ERR_PTR(-EACCES);
+		// goto getname;
 	}
 
 	err = ref_module(mod, fsa.owner);
