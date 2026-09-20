@@ -1205,10 +1205,21 @@ resolve_symbol_wait(struct module *mod,
 	}
 
 	if (IS_ERR(ksym) && strcmp(name, "verify_pkcs7_signature") == 0) {
-		static const struct kernel_symbol dummy_ksym = {
-			.value = (unsigned long)dummy_verify_pkcs7_signature,
-			.name = "verify_pkcs7_signature"
-		};
+		static struct kernel_symbol dummy_ksym;
+		static bool dummy_init = false;
+		if (!dummy_init) {
+#ifdef CONFIG_HAVE_ARCH_PREL32_RELOCATIONS
+			static const char dummy_name[] = "verify_pkcs7_signature";
+			dummy_ksym.value_offset = (int)((unsigned long)dummy_verify_pkcs7_signature - (unsigned long)&dummy_ksym.value_offset);
+			dummy_ksym.name_offset = (int)((unsigned long)dummy_name - (unsigned long)&dummy_ksym.name_offset);
+			dummy_ksym.namespace_offset = 0;
+#else
+			dummy_ksym.value = (unsigned long)dummy_verify_pkcs7_signature;
+			dummy_ksym.name = "verify_pkcs7_signature";
+			dummy_ksym.namespace = NULL;
+#endif
+			dummy_init = true;
+		}
 		pr_warn("%s: BYPASSING missing verify_pkcs7_signature!\n", mod->name);
 		return &dummy_ksym;
 	}
