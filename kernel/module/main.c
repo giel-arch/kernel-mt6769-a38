@@ -1204,7 +1204,7 @@ resolve_symbol_wait(struct module *mod,
 			mod->name, owner);
 	}
 
-	if (IS_ERR(ksym) && strcmp(name, "verify_pkcs7_signature") == 0) {
+	if (IS_ERR_OR_NULL(ksym) && strcmp(name, "verify_pkcs7_signature") == 0) {
 		static struct kernel_symbol dummy_ksym;
 		static bool dummy_init = false;
 		if (!dummy_init) {
