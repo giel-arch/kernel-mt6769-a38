@@ -2,7 +2,7 @@ name: Build Custom Kernel OPPO A38
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ "main", "master", "sukisu-ultra" ]
   workflow_dispatch: # Allows manual trigger
 
 jobs:
