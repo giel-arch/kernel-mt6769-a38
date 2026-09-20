@@ -941,6 +941,19 @@ static struct dev_pm_opp *_opp_add_static_v2(struct opp_table *opp_table,
 	if (ret)
 		goto free_required_opps;
 
+	/* OVERCLOCKING INJECTION for MT6769 CPU */
+	if (new_opp->rates[0] == 1800000000) {
+		new_opp->rates[0] = 2000000000;         /* 1.8 GHz -> 2.0 GHz */
+		new_opp->supplies[0].u_volt += 25000;    /* +25mV */
+		new_opp->supplies[0].u_volt_min = new_opp->supplies[0].u_volt;
+		new_opp->supplies[0].u_volt_max = new_opp->supplies[0].u_volt;
+	} else if (new_opp->rates[0] == 2000000000) {
+		new_opp->rates[0] = 2300000000;         /* 2.0 GHz -> 2.3 GHz */
+		new_opp->supplies[0].u_volt += 50000;    /* +50mV */
+		new_opp->supplies[0].u_volt_min = new_opp->supplies[0].u_volt;
+		new_opp->supplies[0].u_volt_max = new_opp->supplies[0].u_volt;
+	}
+
 	ret = _opp_add(dev, new_opp, opp_table);
 	if (ret) {
 		/* Don't return error for duplicate OPPs */
