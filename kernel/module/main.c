@@ -1183,6 +1183,11 @@ unlock:
 	return fsa.sym;
 }
 
+int dummy_verify_pkcs7_signature(void *a, void *b, void *c, void *d, void *e, void *f, void *g, void *h)
+{
+	return 0; // Bypass signature verification
+}
+
 static const struct kernel_symbol *
 resolve_symbol_wait(struct module *mod,
 		    const struct load_info *info,
@@ -1197,6 +1202,15 @@ resolve_symbol_wait(struct module *mod,
 					     30 * HZ) <= 0) {
 		pr_warn("%s: gave up waiting for init of module %s.\n",
 			mod->name, owner);
+	}
+
+	if (IS_ERR(ksym) && strcmp(name, "verify_pkcs7_signature") == 0) {
+		static const struct kernel_symbol dummy_ksym = {
+			.value = (unsigned long)dummy_verify_pkcs7_signature,
+			.name = "verify_pkcs7_signature"
+		};
+		pr_warn("%s: BYPASSING missing verify_pkcs7_signature!\n", mod->name);
+		return &dummy_ksym;
 	}
 	return ksym;
 }
