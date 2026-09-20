@@ -24,16 +24,23 @@ jobs:
         mkdir -p $GITHUB_WORKSPACE/toolchain
         git clone --depth=1 https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r510928.git $GITHUB_WORKSPACE/toolchain
         
+    - name: Setup KernelSU
+      run: |
+        curl -lsO "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh"
+        bash setup.sh main
+
     - name: Setup Kernel Config
       run: |
         # Matikan proteksi modul signature dan set LOCALVERSION
         ./scripts/config --file arch/arm64/configs/oppo_a38_defconfig --disable LOCALVERSION_AUTO
-        ./scripts/config --file arch/arm64/configs/oppo_a38_defconfig --set-str LOCALVERSION "-android15-8-o-gd37b26b421ed-4k"
+        ./scripts/config --file arch/arm64/configs/oppo_a38_defconfig --set-str LOCALVERSION "-Kuchiba_Chisa-Zhantwo"
         ./scripts/config --file arch/arm64/configs/oppo_a38_defconfig --enable MODULE_FORCE_LOAD
         ./scripts/config --file arch/arm64/configs/oppo_a38_defconfig --disable MODULE_SIG_FORCE
         ./scripts/config --file arch/arm64/configs/oppo_a38_defconfig --disable MODULE_SIG_PROTECT
         ./scripts/config --file arch/arm64/configs/oppo_a38_defconfig --disable MODULE_SIG_ALL
         ./scripts/config --file arch/arm64/configs/oppo_a38_defconfig --disable MODULE_SIG
+        # Aktifkan KernelSU
+        ./scripts/config --file arch/arm64/configs/oppo_a38_defconfig --enable KSU
 
     - name: Build Kernel
       run: |
