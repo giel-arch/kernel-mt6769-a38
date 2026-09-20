@@ -49,7 +49,7 @@ jobs:
         export CROSS_COMPILE=aarch64-linux-gnu-
         
         make O=out ARCH=arm64 oppo_a38_defconfig
-        make -j$(nproc --all) O=out ARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- KCFLAGS="-Wno-default-const-init-var-unsafe" Image.gz
+        make -j$(nproc --all) O=out ARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- KCFLAGS="-Wno-default-const-init-var-unsafe -Wno-default-const-init-field-unsafe" Image.gz
         
     - name: Upload Kernel Image.gz
       uses: actions/upload-artifact@v4
