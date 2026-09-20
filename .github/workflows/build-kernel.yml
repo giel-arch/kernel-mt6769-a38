@@ -1,0 +1,55 @@
+name: Build Custom Kernel OPPO A38
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch: # Allows manual trigger
+
+jobs:
+  build:
+    name: Build Kernel by Kuchiba
+    runs-on: ubuntu-22.04
+    
+    steps:
+    - name: Checkout Kernel Source
+      uses: actions/checkout@v4
+
+    - name: Install Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool libncurses5-dev libncurses5 libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3
+        
+    - name: Download Toolchain (AOSP Clang)
+      run: |
+        mkdir -p $GITHUB_WORKSPACE/toolchain
+        git clone --depth=1 https://github.com/ZyCromerZ/Clang.git -b 14.0.0-r450784d-1 $GITHUB_WORKSPACE/toolchain
+        
+    - name: Setup Kernel Config
+      run: |
+        # Matikan proteksi modul signature dan set LOCALVERSION
+        ./scripts/config --file arch/arm64/configs/oppo_a38_defconfig --disable LOCALVERSION_AUTO
+        ./scripts/config --file arch/arm64/configs/oppo_a38_defconfig --set-str LOCALVERSION ""
+        ./scripts/config --file arch/arm64/configs/oppo_a38_defconfig --enable MODULE_FORCE_LOAD
+        ./scripts/config --file arch/arm64/configs/oppo_a38_defconfig --disable MODULE_SIG_FORCE
+        ./scripts/config --file arch/arm64/configs/oppo_a38_defconfig --disable MODULE_SIG_PROTECT
+        ./scripts/config --file arch/arm64/configs/oppo_a38_defconfig --disable MODULE_SIG_ALL
+        ./scripts/config --file arch/arm64/configs/oppo_a38_defconfig --disable MODULE_SIG
+
+    - name: Build Kernel
+      run: |
+        export PATH="$GITHUB_WORKSPACE/toolchain/bin:$PATH"
+        export ARCH=arm64
+        export CC=clang
+        export LLVM=1
+        export LLVM_IAS=1
+        export CROSS_COMPILE=aarch64-linux-gnu-
+        
+        make O=out ARCH=arm64 oppo_a38_defconfig
+        make -j$(nproc --all) O=out ARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- Image.gz
+        
+    - name: Upload Kernel Image.gz
+      uses: actions/upload-artifact@v4
+      with:
+        name: Kernel-Kuchiba-Chisa-Zestra-4k
+        path: out/arch/arm64/boot/Image.gz
+        compression-level: 9
