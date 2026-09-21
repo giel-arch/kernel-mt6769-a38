@@ -28,7 +28,7 @@ jobs:
       run: |
         # Matikan proteksi modul signature, set LOCALVERSION, dan bypass vermagic
         ./scripts/config --file arch/arm64/configs/oppo_a38_defconfig --disable LOCALVERSION_AUTO
-        ./scripts/config --file arch/arm64/configs/oppo_a38_defconfig --set-str LOCALVERSION "-Kuchiba_Chisa-Zhantwo+"
+        ./scripts/config --file arch/arm64/configs/oppo_a38_defconfig --set-str LOCALVERSION "-Kuchiba_Chisa-Zhantwo#"
         ./scripts/config --file arch/arm64/configs/oppo_a38_defconfig --enable MODULE_FORCE_LOAD
         ./scripts/config --file arch/arm64/configs/oppo_a38_defconfig --disable MODULE_SIG_FORCE
         ./scripts/config --file arch/arm64/configs/oppo_a38_defconfig --disable MODULE_SIG_PROTECT
@@ -44,6 +44,7 @@ jobs:
         export LLVM_IAS=1
         export CROSS_COMPILE=aarch64-linux-gnu-
         
+        echo -n "" > scripts/setlocalversion
         make O=out ARCH=arm64 oppo_a38_defconfig
         make -j$(nproc --all) O=out ARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- Image.gz
         
