@@ -33,7 +33,7 @@ jobs:
         
         # Matikan proteksi modul signature, set LOCALVERSION, dan bypass vermagic
         ./scripts/config --file arch/arm64/configs/oppo_a38_defconfig --disable LOCALVERSION_AUTO
-        ./scripts/config --file arch/arm64/configs/oppo_a38_defconfig --set-str LOCALVERSION "-Kuchiba_Chisa-Zhantwo"
+        ./scripts/config --file arch/arm64/configs/oppo_a38_defconfig --set-str LOCALVERSION "-Kuchiba_Chisa-Zhantwo#"
         ./scripts/config --file arch/arm64/configs/oppo_a38_defconfig --enable MODULE_FORCE_LOAD
         ./scripts/config --file arch/arm64/configs/oppo_a38_defconfig --disable MODULE_SIG_FORCE
         ./scripts/config --file arch/arm64/configs/oppo_a38_defconfig --disable MODULE_SIG_PROTECT
