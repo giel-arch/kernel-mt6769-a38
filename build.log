@@ -1,0 +1,16 @@
+make[1]: Entering directory '/home/josia/Kernel-A38/android_kernel_oppo_mt6769-oppo-mt6769_v_15.0.0/android_kernel_oppo_mt6769-oppo-mt6769_v_15.0.0/out'
+../arch/arm64/Makefile:36: Detected assembler with broken .inst; disassembly will be unreliable
+  GEN     Makefile
+warning: ld does not support --fix-cortex-a53-843419; kernel may be susceptible to erratum
+warning: LSE atomics not supported by binutils
+  CC      scripts/mod/empty.o
+  CC      scripts/mod/devicetable-offsets.s
+gcc: error: unrecognized command-line option ‘-mlittle-endian’
+make[3]: *** [../scripts/Makefile.build:249: scripts/mod/empty.o] Error 1
+make[3]: *** Waiting for unfinished jobs....
+gcc: error: unrecognized command-line option ‘-mlittle-endian’
+make[3]: *** [../scripts/Makefile.build:121: scripts/mod/devicetable-offsets.s] Error 1
+make[2]: *** [/home/josia/Kernel-A38/android_kernel_oppo_mt6769-oppo-mt6769_v_15.0.0/android_kernel_oppo_mt6769-oppo-mt6769_v_15.0.0/Makefile:1279: prepare0] Error 2
+make[1]: *** [/home/josia/Kernel-A38/android_kernel_oppo_mt6769-oppo-mt6769_v_15.0.0/android_kernel_oppo_mt6769-oppo-mt6769_v_15.0.0/Makefile:252: __sub-make] Error 2
+make[1]: Leaving directory '/home/josia/Kernel-A38/android_kernel_oppo_mt6769-oppo-mt6769_v_15.0.0/android_kernel_oppo_mt6769-oppo-mt6769_v_15.0.0/out'
+make: *** [Makefile:252: __sub-make] Error 2
