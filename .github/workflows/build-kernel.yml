@@ -28,6 +28,9 @@ jobs:
         
     - name: Setup Kernel Config
       run: |
+        # Force SukiSU version to 40900 to match the app manager
+        sed -i 's/KSU_VERSION     := $(if $(LOCAL_COUNT),$(shell expr $(VERSION_BASE) + $(LOCAL_COUNT) - $(VERSION_OFFSET)),13000)/KSU_VERSION     := 40900/' KernelSU/kernel/Kbuild
+        
         # Matikan proteksi modul signature, set LOCALVERSION, dan bypass vermagic
         ./scripts/config --file arch/arm64/configs/oppo_a38_defconfig --disable LOCALVERSION_AUTO
         ./scripts/config --file arch/arm64/configs/oppo_a38_defconfig --set-str LOCALVERSION "-Kuchiba_Chisa-Zhantwo"
