@@ -12,7 +12,7 @@
 #include <linux/clk-provider.h>
 #include <linux/platform_device.h>
 
-#include <soc/mediatek/mmdvfs_v3.h>
+#include <linux/soc/mediatek/mmdvfs_v3.h>
 #include "clk-mux.h"
 
 /* hw voter timeout configures */
