@@ -1,1 +1,0 @@
-../../../../../vendor/oplus/kernel/device_info/magnetic_cover/magtransfer/magcvr_notify.h
