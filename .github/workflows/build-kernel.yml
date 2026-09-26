@@ -36,11 +36,13 @@ jobs:
         
         echo -n "" > scripts/setlocalversion
         make O=out ARCH=arm64 oppo_a38_defconfig
-        make -j$(nproc --all) O=out ARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- Image.gz
+        make -j$(nproc --all) O=out ARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- Image.gz modules
         
-    - name: Upload Kernel Image.gz
+    - name: Upload Kernel Image and Modules
       uses: actions/upload-artifact@v4
       with:
         name: Kernel-Kuchiba-Chisa-Zestra-4k
-        path: out/arch/arm64/boot/Image.gz
+        path: |
+          out/arch/arm64/boot/Image.gz
+          out/**/*.ko
         compression-level: 9
