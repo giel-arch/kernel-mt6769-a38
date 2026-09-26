@@ -18,6 +18,12 @@ config COMMON_CLK_MEDIATEK_FHCTL
 	  This driver supports MediaTek frequency hopping and
 	  spread spectrum clocking features.
 
+config COMMON_CLK_MT6768
+	tristate "Clock driver for MediaTek MT6768"
+	select COMMON_CLK_MEDIATEK
+	help
+	  This driver supports MediaTek MT6768 clocks.
+
 config COMMON_CLK_MT2701
 	bool "Clock driver for MediaTek MT2701"
 	depends on (ARCH_MEDIATEK && ARM) || COMPILE_TEST
