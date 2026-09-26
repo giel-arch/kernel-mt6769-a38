@@ -2665,28 +2665,35 @@ static int msdc_of_clock_parse(struct platform_device *pdev,
 static int msdc_drv_probe(struct platform_device *pdev)
 {
 	struct mmc_host *mmc;
+	printk(KERN_ERR "MSDC PMOS DEBUG: PROBE START!\n");
 	struct msdc_host *host;
 	struct resource *res;
 	int ret;
 
 	if (!pdev->dev.of_node) {
 		dev_err(&pdev->dev, "No DT found\n");
+		printk(KERN_ERR "MSDC PMOS DEBUG: No DT found, LINE=%d\n", __LINE__);
 		return -EINVAL;
 	}
 
 	/* Allocate MMC host for this device */
 	mmc = mmc_alloc_host(sizeof(struct msdc_host), &pdev->dev);
-	if (!mmc)
+	if (!mmc) {
+		printk(KERN_ERR "MSDC PMOS DEBUG: mmc_alloc_host failed, LINE=%d\n", __LINE__);
 		return -ENOMEM;
+	}
 
 	host = mmc_priv(mmc);
 	ret = mmc_of_parse(mmc);
-	if (ret)
+	if (ret) {
+		printk(KERN_ERR "MSDC PMOS DEBUG: mmc_of_parse failed, ERROR=%d, LINE=%d\n", ret, __LINE__);
 		goto host_free;
+	}
 
 	host->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(host->base)) {
 		ret = PTR_ERR(host->base);
+		printk(KERN_ERR "MSDC PMOS DEBUG: devm_platform_ioremap_resource failed, ERROR=%d, LINE=%d\n", ret, __LINE__);
 		goto host_free;
 	}
 
@@ -2698,17 +2705,22 @@ static int msdc_drv_probe(struct platform_device *pdev)
 	}
 
 	ret = mmc_regulator_get_supply(mmc);
-	if (ret)
+	if (ret) {
+		printk(KERN_ERR "MSDC PMOS DEBUG: mmc_regulator_get_supply failed, ERROR=%d, LINE=%d\n", ret, __LINE__);
 		goto host_free;
+	}
 
 	ret = msdc_of_clock_parse(pdev, host);
-	if (ret)
+	if (ret) {
+		printk(KERN_ERR "MSDC PMOS DEBUG: msdc_of_clock_parse failed, ERROR=%d, LINE=%d\n", ret, __LINE__);
 		goto host_free;
+	}
 
 	host->reset = devm_reset_control_get_optional_exclusive(&pdev->dev,
 								"hrst");
 	if (IS_ERR(host->reset)) {
 		ret = PTR_ERR(host->reset);
+		printk(KERN_ERR "MSDC PMOS DEBUG: hrst failed, ERROR=%d, LINE=%d\n", ret, __LINE__);
 		goto host_free;
 	}
 
@@ -2724,6 +2736,7 @@ static int msdc_drv_probe(struct platform_device *pdev)
 	host->irq = platform_get_irq(pdev, 0);
 	if (host->irq < 0) {
 		ret = host->irq;
+		printk(KERN_ERR "MSDC PMOS DEBUG: platform_get_irq failed, ERROR=%d, LINE=%d\n", ret, __LINE__);
 		goto host_free;
 	}
 
@@ -2731,6 +2744,7 @@ static int msdc_drv_probe(struct platform_device *pdev)
 	if (IS_ERR(host->pinctrl)) {
 		ret = PTR_ERR(host->pinctrl);
 		dev_err(&pdev->dev, "Cannot find pinctrl!\n");
+		printk(KERN_ERR "MSDC PMOS DEBUG: devm_pinctrl_get failed, ERROR=%d, LINE=%d\n", ret, __LINE__);
 		goto host_free;
 	}
 
@@ -2738,6 +2752,7 @@ static int msdc_drv_probe(struct platform_device *pdev)
 	if (IS_ERR(host->pins_default)) {
 		ret = PTR_ERR(host->pins_default);
 		dev_err(&pdev->dev, "Cannot find pinctrl default!\n");
+		printk(KERN_ERR "MSDC PMOS DEBUG: pinctrl default failed, ERROR=%d, LINE=%d\n", ret, __LINE__);
 		goto host_free;
 	}
 
@@ -2745,6 +2760,7 @@ static int msdc_drv_probe(struct platform_device *pdev)
 	if (IS_ERR(host->pins_uhs)) {
 		ret = PTR_ERR(host->pins_uhs);
 		dev_err(&pdev->dev, "Cannot find pinctrl uhs!\n");
+		printk(KERN_ERR "MSDC PMOS DEBUG: pinctrl uhs failed, ERROR=%d, LINE=%d\n", ret, __LINE__);
 		goto host_free;
 	}
 
@@ -2814,6 +2830,7 @@ static int msdc_drv_probe(struct platform_device *pdev)
 				&host->dma.bd_addr, GFP_KERNEL);
 	if (!host->dma.gpd || !host->dma.bd) {
 		ret = -ENOMEM;
+		printk(KERN_ERR "MSDC PMOS DEBUG: dma allocation failed, LINE=%d\n", __LINE__);
 		goto release_mem;
 	}
 	msdc_init_gpd_bd(host, &host->dma);
@@ -2824,6 +2841,7 @@ static int msdc_drv_probe(struct platform_device *pdev)
 	ret = msdc_ungate_clock(host);
 	if (ret) {
 		dev_err(&pdev->dev, "Cannot ungate clocks!\n");
+		printk(KERN_ERR "MSDC PMOS DEBUG: msdc_ungate_clock failed, ERROR=%d, LINE=%d\n", ret, __LINE__);
 		goto release_mem;
 	}
 	msdc_init_hw(host);
@@ -2834,14 +2852,17 @@ static int msdc_drv_probe(struct platform_device *pdev)
 					     GFP_KERNEL);
 		if (!host->cq_host) {
 			ret = -ENOMEM;
+			printk(KERN_ERR "MSDC PMOS DEBUG: cq_host kzalloc failed, LINE=%d\n", __LINE__);
 			goto host_free;
 		}
 		host->cq_host->caps |= CQHCI_TASK_DESC_SZ_128;
 		host->cq_host->mmio = host->base + 0x800;
 		host->cq_host->ops = &msdc_cmdq_ops;
 		ret = cqhci_init(host->cq_host, mmc, true);
-		if (ret)
+		if (ret) {
+			printk(KERN_ERR "MSDC PMOS DEBUG: cqhci_init failed, ERROR=%d, LINE=%d\n", ret, __LINE__);
 			goto host_free;
+		}
 		mmc->max_segs = 128;
 		/* cqhci 16bit length */
 		/* 0 size, means 65536 so we don't have to -1 here */
@@ -2852,8 +2873,10 @@ static int msdc_drv_probe(struct platform_device *pdev)
 
 	ret = devm_request_irq(&pdev->dev, host->irq, msdc_irq,
 			       IRQF_TRIGGER_NONE, pdev->name, host);
-	if (ret)
+	if (ret) {
+		printk(KERN_ERR "MSDC PMOS DEBUG: devm_request_irq failed, ERROR=%d, LINE=%d\n", ret, __LINE__);
 		goto release;
+	}
 
 	pm_runtime_set_active(host->dev);
 	pm_runtime_set_autosuspend_delay(host->dev, MTK_MMC_AUTOSUSPEND_DELAY);
@@ -2861,8 +2884,10 @@ static int msdc_drv_probe(struct platform_device *pdev)
 	pm_runtime_enable(host->dev);
 	ret = mmc_add_host(mmc);
 
-	if (ret)
+	if (ret) {
+		printk(KERN_ERR "MSDC PMOS DEBUG: mmc_add_host failed, ERROR=%d, LINE=%d\n", ret, __LINE__);
 		goto end;
+	}
 
 	return 0;
 end:
