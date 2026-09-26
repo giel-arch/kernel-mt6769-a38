@@ -7,7 +7,7 @@
 #ifndef __CLK_PLLFH_H
 #define __CLK_PLLFH_H
 
-#include "clk-pll.h"
+#include "clk-mtk.h"
 
 struct fh_pll_state {
 	void __iomem *base;
