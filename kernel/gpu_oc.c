@@ -7,21 +7,27 @@
  * copies a static table into a heap allocated working table, then applies
  * per-chip efuse signed voltages on top.  Stock maximum is 1.0 GHz.
  *
- * We wait for the module to probe, then locate the working table: the module
- * keeps a pointer to it in .bss (verified by decoding
- * __gpufreq_get_fgpu_by_idx, which reads *(u32 *)(table + idx * 24)), and
- * the table itself may also live in the module .bss.  Both are found by the
- * frequency signature of the stock table and patched in place.
+ * Locating the working table:
+ *   1) primary: the module symbol "g_gpu" (88 bytes) holds the working table
+ *      pointer at offset 8 - verified by decoding __gpufreq_get_fgpu_by_idx,
+ *      which reads *(u32 *)(table + idx * 24).  Module kallsyms keeps runtime
+ *      addresses (simplify_symbols() turns st_value into a core pointer, and
+ *      CONFIG_KALLSYMS_ALL keeps data symbols in core_kallsyms).
+ *   2) fallback: signature scan of the module's writable memory for the stock
+ *      frequency ladder (the table itself, or pointers to it from .bss).
+ *      Device mappings (e.g. ioremap'ed MFGCFG @ 0x13000000, reading which
+ *      before the MFG power domain is up trips a DEVAPC BUG) are rejected via
+ *      a RAM backing check.
  *
  * Working table entry (24 bytes, verified against the module binary and
  * /proc/gpufreqv2/gpu_working_opp_table):
  *
  *	struct gpufreq_opp {
  *		u32 freq;	+0   kHz
- *		u32 volt;	+4   uV, efuse signed
- *		u32 vsram;	+8   uV
+ *		u32 volt;	+4   10 uV units, efuse signed (87500 == 0.875 V)
+ *		u32 vsram;	+8   10 uV units
  *		u32 posdiv;	+12  1 or 2
- *		u32 margin;	+16  uV
+ *		u32 margin;	+16
  *		u32 power;	+20  mW, computed by the driver
  *	};
  *
@@ -36,7 +42,7 @@
  *
  * Everything from idx5 down is left untouched, so idle and mid clocks keep
  * their stock efuse signed voltages.  Boot parameter "gpufreq_oc=off"
- * disables the injection.
+ * disables the injection.  Status is exposed at /sys/kernel/gpu_oc/status.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -54,6 +60,9 @@
 #include <linux/workqueue.h>
 
 #define GPUOC_MODULE		"mtk_gpufreq_mt6768"
+#define GPUOC_TABLE_SYM		"g_gpu"
+#define GPUOC_TABLE_SYM_SIZE	0x58
+#define GPUOC_TABLE_PTR_OFF	8
 #define GPUOC_ENTRIES		32
 #define GPUOC_ENTRY_SIZE	24
 
@@ -111,7 +120,14 @@ struct gpuoc_ctx {
 	unsigned int tries;
 	bool done;
 	bool notifier_fired;
+	bool sym_used;
 	unsigned int patched;
+	unsigned int scanned_bytes;
+	unsigned int ptr_candidates;
+	unsigned int rej_ram;
+	unsigned int rej_freq0;
+	unsigned int rej_sig;
+	unsigned long long last_reject;
 	struct delayed_work work;
 };
 
@@ -192,6 +208,23 @@ static bool gpuoc_target_is_ram(const void *p)
 	return virt_addr_valid(p);
 }
 
+static bool gpuoc_valid_target(const void *target, struct module *mod)
+{
+	if ((unsigned long)target & (sizeof(void *) - 1))
+		return false;
+	if ((unsigned long)target < 0xffff800000000000ULL)
+		return false;
+	if (gpuoc_target_is_module(target, mod))
+		return false;
+	if (!gpuoc_target_is_ram(target)) {
+		gpuoc.rej_ram++;
+		gpuoc.last_reject = (unsigned long long)(unsigned long)target;
+		return false;
+	}
+
+	return true;
+}
+
 static u32 gpuoc_scale_power(u32 p0, u32 f0, u32 v0, u32 f, u32 v)
 {
 	u64 num, den;
@@ -242,26 +275,64 @@ static void gpuoc_patch_table(struct gpuoc_opp *t)
 	}
 }
 
-/*
- * The working table is either a .bss array or heap memory referenced from a
- * module .bss pointer (the latter is what the stock module actually does).
- * Scan the module's writable memory for both shapes and patch every match,
- * writing through pointers only after confirming they reference RAM and a
- * fault tolerant validation of the full table.
- */
 static bool gpuoc_table_probe(const void *p, struct gpuoc_opp *snapshot)
 {
 	u32 freq0;
 
 	/* cheap probe first: never pull a full table through a bad pointer */
-	if (!gpuoc_read_safe(p, &freq0, sizeof(freq0)) || freq0 != STOCK_F0)
+	if (!gpuoc_read_safe(p, &freq0, sizeof(freq0)) || freq0 != STOCK_F0) {
+		gpuoc.rej_freq0++;
 		return false;
-	if (!gpuoc_read_safe(p, snapshot, sizeof(snapshot)))
+	}
+	if (!gpuoc_read_safe(p, snapshot, sizeof(snapshot))) {
+		gpuoc.rej_freq0++;
 		return false;
+	}
+	if (!gpuoc_table_match(snapshot)) {
+		gpuoc.rej_sig++;
+		gpuoc.last_reject = (unsigned long long)(unsigned long)p;
+		return false;
+	}
 
-	return gpuoc_table_match(snapshot);
+	return true;
 }
 
+/*
+ * Primary locate: module kallsyms keeps runtime addresses for data symbols
+ * (CONFIG_KALLSYMS_ALL), and the 88-byte "g_gpu" struct holds the working
+ * table pointer at offset 8.
+ */
+static void *gpuoc_find_table_via_symbol(struct module *mod)
+{
+	const struct mod_kallsyms *kallsyms = &mod->core_kallsyms;
+	unsigned int i;
+	void *sym_base = NULL;
+
+	for (i = 0; i < kallsyms->num_symtab; i++) {
+		const Elf_Sym *sym = &kallsyms->symtab[i];
+
+		if (sym->st_size != GPUOC_TABLE_SYM_SIZE)
+			continue;
+		if (strcmp(GPUOC_TABLE_SYM, kallsyms->strtab + sym->st_name))
+			continue;
+		sym_base = (void *)(unsigned long)sym->st_value;
+		break;
+	}
+
+	if (!sym_base) {
+		gpuoc.last_reject = 0xdeadbeef;	/* marker: symbol not found */
+		return NULL;
+	}
+
+	return sym_base + GPUOC_TABLE_PTR_OFF;
+}
+
+/*
+ * Fallback locate: the working table is either a .bss array or heap memory
+ * referenced from a module .bss pointer.  Scan the module's writable memory
+ * for both shapes and patch every match, writing through pointers only
+ * after confirming they reference RAM and a fault tolerant validation.
+ */
 static unsigned int gpuoc_scan_module(struct module *mod)
 {
 	unsigned long base, end, addr, last = 0;
@@ -272,6 +343,8 @@ static unsigned int gpuoc_scan_module(struct module *mod)
 	end = base + mod->mem[MOD_DATA].size;
 	if (!base)
 		return 0;
+
+	gpuoc.scanned_bytes = mod->mem[MOD_DATA].size;
 
 	for (addr = base;
 	     addr + GPUOC_ENTRY_SIZE * GPUOC_ENTRIES <= end && patched < GPUOC_MAX_TABLES;
@@ -298,12 +371,12 @@ static unsigned int gpuoc_scan_module(struct module *mod)
 		    maybe_ptr < 0xffff800000000000ULL)
 			continue;
 
+		gpuoc.ptr_candidates++;
 		target = (void *)(unsigned long)maybe_ptr;
 		if (gpuoc_target_is_module(target, mod))
 			continue;
-		if (!gpuoc_target_is_ram(target))
+		if (!gpuoc_valid_target(target, mod))
 			continue;
-
 		if (!gpuoc_table_probe(target, snapshot))
 			continue;
 
@@ -311,6 +384,41 @@ static unsigned int gpuoc_scan_module(struct module *mod)
 		last = (unsigned long)target;
 		patched++;
 	}
+
+	return patched;
+}
+
+static unsigned int gpuoc_try_patch(struct module *mod)
+{
+	struct gpuoc_opp snapshot[GPUOC_ENTRIES];
+	unsigned int patched = 0;
+	void *ptr_slot, *table;
+
+	/* primary: resolve the working table pointer through the symbol */
+	ptr_slot = gpuoc_find_table_via_symbol(mod);
+	if (ptr_slot && gpuoc_read_safe(ptr_slot, snapshot, sizeof(u64))) {
+		u64 ptr = *(u64 *)snapshot;
+
+		if ((ptr & (sizeof(void *) - 1)) ||
+		    ptr < 0xffff800000000000ULL)
+			goto scan;
+
+		table = (void *)(unsigned long)ptr;
+		if (gpuoc_target_is_module(table, mod))
+			goto scan;
+		if (!gpuoc_valid_target(table, mod))
+			goto scan;
+		if (!gpuoc_table_probe(table, snapshot))
+			goto scan;
+
+		gpuoc_patch_table(table);
+		gpuoc.sym_used = true;
+		patched++;
+	}
+
+scan:
+	/* fallback: signature scan (also covers the signed table copy) */
+	patched += gpuoc_scan_module(mod);
 
 	return patched;
 }
@@ -337,7 +445,7 @@ static void gpuoc_workfn(struct work_struct *work)
 		return;
 	}
 
-	patched = gpuoc_scan_module(mod);
+	patched = gpuoc_try_patch(mod);
 	module_put(mod);
 	gpuoc.patched = patched;
 
@@ -352,7 +460,7 @@ static void gpuoc_workfn(struct work_struct *work)
 		schedule_delayed_work(dw, msecs_to_jiffies(GPUOC_RETRY_MS));
 	} else {
 		gpuoc.done = true;
-		pr_warn("GPU OC: working OPP table not found, giving up (module layout changed?)\n");
+		pr_warn("GPU OC: working OPP table not found, giving up (see /sys/kernel/gpu_oc/status)\n");
 	}
 }
 
@@ -382,9 +490,16 @@ static ssize_t gpuoc_status_show(struct kobject *kobj, struct kobj_attribute *at
 				 char *buf)
 {
 	return sysfs_emit(buf,
-			  "notifier_fired=%d tries=%u done=%d tables_patched=%u\n",
+			  "notifier_fired=%d tries=%u done=%d\n"
+			  "sym_used=%d tables_patched=%u\n"
+			  "scanned_bytes=%u ptr_candidates=%u\n"
+			  "rej_ram=%u rej_freq0=%u rej_sig=%u\n"
+			  "last_reject=0x%llx\n",
 			  gpuoc.notifier_fired, gpuoc.tries, gpuoc.done,
-			  gpuoc.patched);
+			  gpuoc.sym_used, gpuoc.patched,
+			  gpuoc.scanned_bytes, gpuoc.ptr_candidates,
+			  gpuoc.rej_ram, gpuoc.rej_freq0, gpuoc.rej_sig,
+			  gpuoc.last_reject);
 }
 static struct kobj_attribute gpuoc_status_attr =
 	__ATTR(status, 0444, gpuoc_status_show, NULL);
