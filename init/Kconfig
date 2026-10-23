@@ -1973,6 +1973,15 @@ source "block/Kconfig"
 config PREEMPT_NOTIFIERS
 	bool
 
+config GPU_OPP_OC
+	bool "Overclock MT6768 GPU OPP table to 1.4 GHz (OPPO A38)"
+	depends on MODULES
+	help
+	  Wait for the vendor module mtk_gpufreq_mt6768 to build its working
+	  OPP table, then rewrite the top entries so the Mali-G52 GPU can
+	  reach 1.4 GHz (stock maximum: 1.0 GHz).  Boot with gpufreq_oc=off
+	  to disable the injection at runtime.
+
 config PADATA
 	depends on SMP
 	bool
