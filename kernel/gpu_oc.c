@@ -43,10 +43,12 @@
 
 #include <linux/init.h>
 #include <linux/kernel.h>
+#include <linux/kobject.h>
 #include <linux/math64.h>
 #include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/notifier.h>
+#include <linux/sysfs.h>
 #include <linux/uaccess.h>
 #include <linux/vmalloc.h>
 #include <linux/workqueue.h>
@@ -64,22 +66,23 @@
 #define STOCK_F12	690000
 #define STOCK_F31	299000
 
-/* new top OPPs (absolute values, post-efuse domain) */
+/* new top OPPs (absolute values, post-efuse domain)
+ * NOTE: the table stores voltages in units of 10 uV (87500 == 0.875 V) */
 #define OC0_FREQ	1400000
-#define OC0_VOLT	118750
-#define OC0_VSRAM	112500
+#define OC0_VOLT	118750		/* 1.1875 V */
+#define OC0_VSRAM	112500		/* 1.125 V */
 #define OC1_FREQ	1300000
-#define OC1_VOLT	112500
+#define OC1_VOLT	112500		/* 1.125 V */
 #define OC2_FREQ	1200000
-#define OC2_VOLT	106250
+#define OC2_VOLT	106250		/* 1.0625 V */
 #define OC3_FREQ	1100000
-#define OC3_VOLT	100000
+#define OC3_VOLT	100000		/* 1.0 V */
 #define OC_VSRAM_CAP	112500
 #define OC_MARGIN	1875
 
-/* sanity window for OPP voltages (MT6358 vgpu/vsram range) */
-#define GPUOC_VOLT_MIN	500000
-#define GPUOC_VOLT_MAX	1292214
+/* sanity window for OPP voltages (MT6358 vgpu/vsram, 10 uV units) */
+#define GPUOC_VOLT_MIN	50000		/* 0.5 V */
+#define GPUOC_VOLT_MAX	129222		/* 1.2922 V */
 
 /* retry budget: 150 * 200ms = 30s after the module finishes loading */
 #define GPUOC_MAX_TRIES	150
@@ -107,6 +110,8 @@ struct gpuoc_ctx {
 	struct module *mod;
 	unsigned int tries;
 	bool done;
+	bool notifier_fired;
+	unsigned int patched;
 	struct delayed_work work;
 };
 
@@ -334,6 +339,7 @@ static void gpuoc_workfn(struct work_struct *work)
 
 	patched = gpuoc_scan_module(mod);
 	module_put(mod);
+	gpuoc.patched = patched;
 
 	if (patched) {
 		pr_info("GPU OC applied: %u table(s) patched, top OPP %u kHz @ %u uV\n",
@@ -364,12 +370,25 @@ static int gpuoc_module_notify(struct notifier_block *nb, unsigned long action,
 	gpuoc.mod = mod;
 	gpuoc.tries = 0;
 	gpuoc.done = false;
+	gpuoc.notifier_fired = true;
 	schedule_delayed_work(&gpuoc.work, msecs_to_jiffies(500));
 
 	pr_info("watching %s for its working OPP table\n", GPUOC_MODULE);
 
 	return NOTIFY_DONE;
 }
+
+static ssize_t gpuoc_status_show(struct kobject *kobj, struct kobj_attribute *attr,
+				 char *buf)
+{
+	return sysfs_emit(buf,
+			  "notifier_fired=%d tries=%u done=%d tables_patched=%u\n",
+			  gpuoc.notifier_fired, gpuoc.tries, gpuoc.done,
+			  gpuoc.patched);
+}
+static struct kobj_attribute gpuoc_status_attr =
+	__ATTR(status, 0444, gpuoc_status_show, NULL);
+static struct kobject *gpuoc_kobj;
 
 static struct notifier_block gpuoc_nb = {
 	.notifier_call = gpuoc_module_notify,
@@ -381,6 +400,10 @@ static int __init gpu_oc_init(void)
 		pr_info("disabled by kernel cmdline\n");
 		return 0;
 	}
+
+	gpuoc_kobj = kobject_create_and_add("gpu_oc", kernel_kobj);
+	if (!gpuoc_kobj || sysfs_create_file(gpuoc_kobj, &gpuoc_status_attr.attr))
+		pr_warn("failed to create /sys/kernel/gpu_oc/status\n");
 
 	INIT_DELAYED_WORK(&gpuoc.work, gpuoc_workfn);
 
