@@ -44,9 +44,11 @@
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/math64.h>
+#include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/notifier.h>
 #include <linux/uaccess.h>
+#include <linux/vmalloc.h>
 #include <linux/workqueue.h>
 
 #define GPUOC_MODULE		"mtk_gpufreq_mt6768"
@@ -165,6 +167,26 @@ static bool gpuoc_target_is_module(const void *p, const struct module *mod)
 	return false;
 }
 
+/*
+ * Reject pointer targets that are not backed by RAM.  The vendor module
+ * keeps ioremap'ed pointers (e.g. MFGCFG @ 0x13000000) in .bss; reading
+ * those while the MFG power domain is down trips a hardware DEVAPC
+ * protection fault, which the vendor devapc driver treats as a BUG().
+ * Device mappings have no RAM struct page behind them, so they never
+ * pass this check.
+ */
+static bool gpuoc_target_is_ram(const void *p)
+{
+	struct page *page;
+
+	if (is_vmalloc_addr(p)) {
+		page = vmalloc_to_page(p);
+		return page && pfn_valid(page_to_pfn(page));
+	}
+
+	return virt_addr_valid(p);
+}
+
 static u32 gpuoc_scale_power(u32 p0, u32 f0, u32 v0, u32 f, u32 v)
 {
 	u64 num, den;
@@ -219,8 +241,22 @@ static void gpuoc_patch_table(struct gpuoc_opp *t)
  * The working table is either a .bss array or heap memory referenced from a
  * module .bss pointer (the latter is what the stock module actually does).
  * Scan the module's writable memory for both shapes and patch every match,
- * writing through pointers only after a fault tolerant validation.
+ * writing through pointers only after confirming they reference RAM and a
+ * fault tolerant validation of the full table.
  */
+static bool gpuoc_table_probe(const void *p, struct gpuoc_opp *snapshot)
+{
+	u32 freq0;
+
+	/* cheap probe first: never pull a full table through a bad pointer */
+	if (!gpuoc_read_safe(p, &freq0, sizeof(freq0)) || freq0 != STOCK_F0)
+		return false;
+	if (!gpuoc_read_safe(p, snapshot, sizeof(snapshot)))
+		return false;
+
+	return gpuoc_table_match(snapshot);
+}
+
 static unsigned int gpuoc_scan_module(struct module *mod)
 {
 	unsigned long base, end, addr, last = 0;
@@ -239,8 +275,8 @@ static unsigned int gpuoc_scan_module(struct module *mod)
 		void *target;
 
 		/* direct hit: the table lives inside the module memory */
-		if (gpuoc_read_safe((void *)addr, snapshot, sizeof(snapshot)) &&
-		    gpuoc_table_match(snapshot)) {
+		if (addr % 8 == 0 &&
+		    gpuoc_table_probe((void *)addr, snapshot)) {
 			gpuoc_patch_table((void *)addr);
 			last = addr;
 			patched++;
@@ -260,8 +296,10 @@ static unsigned int gpuoc_scan_module(struct module *mod)
 		target = (void *)(unsigned long)maybe_ptr;
 		if (gpuoc_target_is_module(target, mod))
 			continue;
-		if (!gpuoc_read_safe(target, snapshot, sizeof(snapshot)) ||
-		    !gpuoc_table_match(snapshot))
+		if (!gpuoc_target_is_ram(target))
+			continue;
+
+		if (!gpuoc_table_probe(target, snapshot))
 			continue;
 
 		gpuoc_patch_table(target);
