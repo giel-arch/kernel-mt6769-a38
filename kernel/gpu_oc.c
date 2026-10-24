@@ -124,6 +124,7 @@ struct gpuoc_ctx {
 	unsigned int patched;
 	unsigned int scanned_bytes;
 	unsigned int ptr_candidates;
+	unsigned int rej_read;
 	unsigned int rej_ram;
 	unsigned int rej_freq0;
 	unsigned int rej_sig;
@@ -292,14 +293,17 @@ static void gpuoc_patch_table(struct gpuoc_opp *t)
 
 static bool gpuoc_table_probe(const void *p, struct gpuoc_opp *snapshot)
 {
-	u32 freq0;
-
-	/* cheap probe first: never pull a full table through a bad pointer */
-	if (!gpuoc_read_safe(p, &freq0, sizeof(freq0)) || freq0 != STOCK_F0) {
-		gpuoc.rej_freq0++;
+	/*
+	 * Read the full table in one go.  The byte-wise small read used
+	 * before went through the u32 unsafe_get_user path, which faults on
+	 * linear-map addresses in this kernel (the u64 path works - proven
+	 * by the 384 byte capture), so never use small reads here.
+	 */
+	if (!gpuoc_read_safe(p, snapshot, sizeof(snapshot))) {
+		gpuoc.rej_read++;
 		return false;
 	}
-	if (!gpuoc_read_safe(p, snapshot, sizeof(snapshot))) {
+	if (snapshot[0].freq != STOCK_F0) {
 		gpuoc.rej_freq0++;
 		return false;
 	}
@@ -546,13 +550,13 @@ static ssize_t gpuoc_status_show(struct kobject *kobj, struct kobj_attribute *at
 			  "notifier_fired=%d tries=%u done=%d\n"
 			  "sym_used=%d tables_patched=%u\n"
 			  "scanned_bytes=%u ptr_candidates=%u\n"
-			  "rej_ram=%u rej_freq0=%u rej_sig=%u\n"
+			  "rej_read=%u rej_ram=%u rej_freq0=%u rej_sig=%u\n"
 			  "last_reject=0x%llx\n",
 			  gpuoc.notifier_fired, gpuoc.tries, gpuoc.done,
 			  gpuoc.sym_used, gpuoc.patched,
 			  gpuoc.scanned_bytes, gpuoc.ptr_candidates,
-			  gpuoc.rej_ram, gpuoc.rej_freq0, gpuoc.rej_sig,
-			  gpuoc.last_reject);
+			  gpuoc.rej_read, gpuoc.rej_ram, gpuoc.rej_freq0,
+			  gpuoc.rej_sig, gpuoc.last_reject);
 }
 static struct kobj_attribute gpuoc_status_attr =
 	__ATTR(status, 0444, gpuoc_status_show, NULL);
