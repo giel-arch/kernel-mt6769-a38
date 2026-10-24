@@ -142,6 +142,9 @@ static unsigned long long gpuoc_dbg_ptr;
 static unsigned long long gpuoc_dbg_cand;
 static u32 gpuoc_dbg_cand_words[GPUOC_DBG_WORDS];
 static bool gpuoc_dbg_valid;
+static unsigned long long gpuoc_dbg_table_addr;
+static u32 gpuoc_dbg_table_words[GPUOC_DBG_WORDS];
+static bool gpuoc_dbg_table_valid;
 
 /*
  * The stock table is identified by its frequency ladder and posdiv split
@@ -434,6 +437,15 @@ static unsigned int gpuoc_try_patch(struct module *mod)
 			goto scan;
 		if (!gpuoc_valid_target(table, mod))
 			goto scan;
+
+		/* capture the real working table bytes for offline analysis */
+		if (!gpuoc_dbg_table_valid &&
+		    gpuoc_read_safe(table, gpuoc_dbg_table_words,
+				    sizeof(gpuoc_dbg_table_words))) {
+			gpuoc_dbg_table_addr = ptr;
+			gpuoc_dbg_table_valid = true;
+		}
+
 		if (!gpuoc_table_probe(table, snapshot))
 			goto scan;
 
@@ -559,6 +571,21 @@ static ssize_t gpuoc_peek_show(struct kobject *kobj, struct kobj_attribute *attr
 					     gpuoc_dbg_cand_words[i + 5],
 					     gpuoc_dbg_cand_words[i + 6],
 					     gpuoc_dbg_cand_words[i + 7]);
+	}
+	len += sysfs_emit_at(buf, len, "table_addr=0x%llx valid=%d\n",
+			     gpuoc_dbg_table_addr, gpuoc_dbg_table_valid);
+	if (gpuoc_dbg_table_valid) {
+		for (i = 0; i < GPUOC_DBG_WORDS; i += 8)
+			len += sysfs_emit_at(buf, len,
+					     "t[%02u]=%08x %08x %08x %08x %08x %08x %08x %08x\n",
+					     i, gpuoc_dbg_table_words[i],
+					     gpuoc_dbg_table_words[i + 1],
+					     gpuoc_dbg_table_words[i + 2],
+					     gpuoc_dbg_table_words[i + 3],
+					     gpuoc_dbg_table_words[i + 4],
+					     gpuoc_dbg_table_words[i + 5],
+					     gpuoc_dbg_table_words[i + 6],
+					     gpuoc_dbg_table_words[i + 7]);
 	}
 
 	return len;
