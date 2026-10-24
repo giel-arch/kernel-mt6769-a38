@@ -148,8 +148,11 @@ static bool gpuoc_dbg_table_valid;
 
 /*
  * The stock table is identified by its frequency ladder and posdiv split
- * (1 above 743 MHz, 2 below).  This is unique inside the module and survives
- * efuse voltage adjustments, which only touch volt/vsram.
+ * (1 above 743 MHz, 2 below).  The platform keeps TWO heap copies: the
+ * generic signed ladder (lower steps like 825/800/770 MHz) and the efuse
+ * signed working table (823/796/769 MHz...), so only anchors shared by
+ * both are used and the floor is only range-checked.  This survives efuse
+ * voltage adjustments, which only touch volt/vsram.
  */
 static bool gpuoc_table_match(const struct gpuoc_opp *t)
 {
@@ -157,16 +160,15 @@ static bool gpuoc_table_match(const struct gpuoc_opp *t)
 
 	if (t[0].freq != STOCK_F0 || t[1].freq != STOCK_F1 ||
 	    t[2].freq != STOCK_F2 || t[3].freq != STOCK_F3 ||
-	    t[4].freq != STOCK_F4 || t[12].freq != STOCK_F12 ||
-	    t[31].freq != STOCK_F31)
+	    t[4].freq != STOCK_F4 || t[12].freq != STOCK_F12)
 		return false;
 
 	if (t[0].posdiv != 1 || t[1].posdiv != 1 ||
-	    t[12].posdiv != 2 || t[31].posdiv != 2)
+	    t[12].posdiv != 2)
 		return false;
 
 	for (i = 0; i < GPUOC_ENTRIES; i++) {
-		if (t[i].freq < STOCK_F31 || t[i].freq > STOCK_F0)
+		if (t[i].freq < 250000 || t[i].freq > STOCK_F0)
 			return false;
 		if (t[i].volt < GPUOC_VOLT_MIN || t[i].volt > GPUOC_VOLT_MAX)
 			return false;
@@ -409,37 +411,48 @@ static unsigned int gpuoc_try_patch(struct module *mod)
 	struct gpuoc_opp snapshot[GPUOC_ENTRIES];
 	unsigned int patched = 0;
 	void *ptr_slot, *table;
+	unsigned int slot;
 
-	/* primary: resolve the working table pointer through the symbol */
+	/*
+	 * Primary: the 88-byte "g_gpu" struct holds two heap table pointers
+	 * (generic signed ladder at +8, efuse signed working table at +16).
+	 * Both are the driver's own runtime data, so after the cheap sanity
+	 * checks the fault tolerant probe is enough - no heap-vs-MMIO
+	 * heuristic is needed here (that check misfires on this kernel's
+	 * VA layout and was rejecting the tables outright).
+	 */
 	ptr_slot = gpuoc_find_table_via_symbol(mod);
-	if (ptr_slot) {
+	if (!ptr_slot)
+		goto scan;
+
+	{
 		u64 gwords[12];
 
 		gpuoc_dbg_sym_addr = (unsigned long long)(unsigned long)ptr_slot -
 				     GPUOC_TABLE_PTR_OFF;
 		if (gpuoc_read_safe((void *)(unsigned long)gpuoc_dbg_sym_addr,
-				    gwords, sizeof(gwords))) {
+				    gwords, sizeof(gwords)))
 			memcpy(gpuoc_dbg_sym_words, gwords, sizeof(gwords));
-		}
 	}
 
-	if (ptr_slot && gpuoc_read_safe(ptr_slot, snapshot, sizeof(u64))) {
-		u64 ptr = *(u64 *)snapshot;
+	for (slot = 0; slot < 2; slot++) {
+		u64 ptr;
 
-		gpuoc_dbg_ptr = ptr;
+		if (!gpuoc_read_safe(ptr_slot + slot * sizeof(u64),
+				     &ptr, sizeof(ptr)))
+			continue;
+		if (slot == 0)
+			gpuoc_dbg_ptr = ptr;
 
 		if ((ptr & (sizeof(void *) - 1)) ||
 		    ptr < 0xffff800000000000ULL)
-			goto scan;
+			continue;
 
 		table = (void *)(unsigned long)ptr;
 		if (gpuoc_target_is_module(table, mod))
-			goto scan;
-		if (!gpuoc_valid_target(table, mod))
-			goto scan;
+			continue;
 
-		/* capture the real working table bytes for offline analysis */
-		if (!gpuoc_dbg_table_valid &&
+		if (slot == 0 && !gpuoc_dbg_table_valid &&
 		    gpuoc_read_safe(table, gpuoc_dbg_table_words,
 				    sizeof(gpuoc_dbg_table_words))) {
 			gpuoc_dbg_table_addr = ptr;
@@ -447,15 +460,17 @@ static unsigned int gpuoc_try_patch(struct module *mod)
 		}
 
 		if (!gpuoc_table_probe(table, snapshot))
-			goto scan;
+			continue;
 
 		gpuoc_patch_table(table);
 		gpuoc.sym_used = true;
 		patched++;
+		if (patched >= GPUOC_MAX_TABLES)
+			break;
 	}
 
 scan:
-	/* fallback: signature scan (also covers the signed table copy) */
+	/* fallback: signature scan (also covers any further table copies) */
 	patched += gpuoc_scan_module(mod);
 
 	return patched;
