@@ -133,6 +133,16 @@ struct gpuoc_ctx {
 
 static struct gpuoc_ctx gpuoc;
 
+/* raw diagnostics: the last freq0-passing candidate and the symbol path data,
+ * exposed via /sys/kernel/gpu_oc/peek for offline layout analysis */
+#define GPUOC_DBG_WORDS	96
+static unsigned long long gpuoc_dbg_sym_addr;
+static unsigned long long gpuoc_dbg_sym_words[12];
+static unsigned long long gpuoc_dbg_ptr;
+static unsigned long long gpuoc_dbg_cand;
+static u32 gpuoc_dbg_cand_words[GPUOC_DBG_WORDS];
+static bool gpuoc_dbg_valid;
+
 /*
  * The stock table is identified by its frequency ladder and posdiv split
  * (1 above 743 MHz, 2 below).  This is unique inside the module and survives
@@ -291,6 +301,9 @@ static bool gpuoc_table_probe(const void *p, struct gpuoc_opp *snapshot)
 	if (!gpuoc_table_match(snapshot)) {
 		gpuoc.rej_sig++;
 		gpuoc.last_reject = (unsigned long long)(unsigned long)p;
+		memcpy(gpuoc_dbg_cand_words, snapshot, sizeof(gpuoc_dbg_cand_words));
+		gpuoc_dbg_cand = (unsigned long long)(unsigned long)p;
+		gpuoc_dbg_valid = true;
 		return false;
 	}
 
@@ -396,8 +409,21 @@ static unsigned int gpuoc_try_patch(struct module *mod)
 
 	/* primary: resolve the working table pointer through the symbol */
 	ptr_slot = gpuoc_find_table_via_symbol(mod);
+	if (ptr_slot) {
+		u64 gwords[12];
+
+		gpuoc_dbg_sym_addr = (unsigned long long)(unsigned long)ptr_slot -
+				     GPUOC_TABLE_PTR_OFF;
+		if (gpuoc_read_safe((void *)(unsigned long)gpuoc_dbg_sym_addr,
+				    gwords, sizeof(gwords))) {
+			memcpy(gpuoc_dbg_sym_words, gwords, sizeof(gwords));
+		}
+	}
+
 	if (ptr_slot && gpuoc_read_safe(ptr_slot, snapshot, sizeof(u64))) {
 		u64 ptr = *(u64 *)snapshot;
+
+		gpuoc_dbg_ptr = ptr;
 
 		if ((ptr & (sizeof(void *) - 1)) ||
 		    ptr < 0xffff800000000000ULL)
@@ -503,6 +529,42 @@ static ssize_t gpuoc_status_show(struct kobject *kobj, struct kobj_attribute *at
 }
 static struct kobj_attribute gpuoc_status_attr =
 	__ATTR(status, 0444, gpuoc_status_show, NULL);
+
+static ssize_t gpuoc_peek_show(struct kobject *kobj, struct kobj_attribute *attr,
+			       char *buf)
+{
+	ssize_t len = 0;
+	unsigned int i;
+
+	len += sysfs_emit_at(buf, len, "g_gpu_addr=0x%llx\n", gpuoc_dbg_sym_addr);
+	for (i = 0; i < 12; i += 4)
+		len += sysfs_emit_at(buf, len,
+				     "g_gpu[%02u]=%016llx %016llx %016llx %016llx\n",
+				     i, gpuoc_dbg_sym_words[i],
+				     gpuoc_dbg_sym_words[i + 1],
+				     gpuoc_dbg_sym_words[i + 2],
+				     gpuoc_dbg_sym_words[i + 3]);
+	len += sysfs_emit_at(buf, len, "table_ptr=0x%llx\n", gpuoc_dbg_ptr);
+	len += sysfs_emit_at(buf, len, "cand_addr=0x%llx valid=%d\n",
+			     gpuoc_dbg_cand, gpuoc_dbg_valid);
+	if (gpuoc_dbg_valid) {
+		for (i = 0; i < GPUOC_DBG_WORDS; i += 8)
+			len += sysfs_emit_at(buf, len,
+					     "w[%02u]=%08x %08x %08x %08x %08x %08x %08x %08x\n",
+					     i, gpuoc_dbg_cand_words[i],
+					     gpuoc_dbg_cand_words[i + 1],
+					     gpuoc_dbg_cand_words[i + 2],
+					     gpuoc_dbg_cand_words[i + 3],
+					     gpuoc_dbg_cand_words[i + 4],
+					     gpuoc_dbg_cand_words[i + 5],
+					     gpuoc_dbg_cand_words[i + 6],
+					     gpuoc_dbg_cand_words[i + 7]);
+	}
+
+	return len;
+}
+static struct kobj_attribute gpuoc_peek_attr =
+	__ATTR(peek, 0444, gpuoc_peek_show, NULL);
 static struct kobject *gpuoc_kobj;
 
 static struct notifier_block gpuoc_nb = {
@@ -517,8 +579,10 @@ static int __init gpu_oc_init(void)
 	}
 
 	gpuoc_kobj = kobject_create_and_add("gpu_oc", kernel_kobj);
-	if (!gpuoc_kobj || sysfs_create_file(gpuoc_kobj, &gpuoc_status_attr.attr))
-		pr_warn("failed to create /sys/kernel/gpu_oc/status\n");
+	if (!gpuoc_kobj ||
+	    sysfs_create_file(gpuoc_kobj, &gpuoc_status_attr.attr) ||
+	    sysfs_create_file(gpuoc_kobj, &gpuoc_peek_attr.attr))
+		pr_warn("failed to create /sys/kernel/gpu_oc/status or peek\n");
 
 	INIT_DELAYED_WORK(&gpuoc.work, gpuoc_workfn);
 
